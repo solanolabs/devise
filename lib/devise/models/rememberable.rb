@@ -43,9 +43,9 @@ module Devise
 
       # Generate a new remember token and save the record without validations
       # unless remember_across_browsers is true and the user already has a valid token.
-      def remember_me!(extend_period=false)
-        self.remember_token = self.class.remember_token if generate_remember_token?
-        self.remember_created_at = Time.now.utc if generate_remember_timestamp?(extend_period)
+      def remember_me!(*)
+        self.remember_token = self.class.remember_token if respond_to?(:remember_token)
+        self.remember_created_at ||= Time.now.utc
         save(:validate => false)
       end
 
@@ -53,19 +53,13 @@ module Devise
       # it exists), and save the record without validations.
       def forget_me!
         return unless persisted?
-        self.remember_token = nil if respond_to?(:remember_token=)
+        self.remember_token = nil if respond_to?(:remember_token)
         self.remember_created_at = nil
         save(:validate => false)
       end
 
-      # Remember token should be expired if expiration time not overpass now.
-      def remember_expired?
-        remember_created_at.nil? || (remember_expires_at <= Time.now.utc)
-      end
-
-      # Remember token expires at created time + remember_for configuration
       def remember_expires_at
-        remember_created_at + self.class.remember_for
+        self.class.remember_for.from_now
       end
 
       def rememberable_value
@@ -87,26 +81,30 @@ module Devise
 
     protected
 
-      def generate_remember_token?
-        respond_to?(:remember_token) && remember_expired?
-      end
-
-      # Generate a timestamp if extend_remember_period is true, if no remember_token
-      # exists, or if an existing remember token has expired.
-      def generate_remember_timestamp?(extend_period) #:nodoc:
-        extend_period || remember_created_at.nil? || remember_expired?
-      end
-
       module ClassMethods
         # Create the cookie key using the record id and remember_token
         def serialize_into_cookie(record)
-          [record.to_key, record.rememberable_value]
+          [record.to_key, record.rememberable_value, Time.now.utc]
         end
 
         # Recreate the user based on the stored cookie
-        def serialize_from_cookie(id, remember_token)
-          record = to_adapter.get(id)
-          record if record && record.rememberable_value == remember_token && !record.remember_expired?
+        def serialize_from_cookie(*args)
+          id, token, generated_at = args
+
+          # The token is only valid if:
+          # 1. we have a date
+          # 2. the current time does not pass the expiry period
+          # 3. there is a record with the given id
+          # 4. the record has a remember_created_at date
+          # 5. the token date is bigger than the remember_created_at
+          # 6. the token matches
+          if generated_at &&
+             (self.remember_for.ago < generated_at) &&
+             (record = to_adapter.get(id)) &&
+             (generated_at > (record.remember_created_at || Time.now).utc) &&
+             Devise.secure_compare(record.rememberable_value, token)
+            record
+          end
         end
 
         # Generate a token checking if one does not already exist in the database.

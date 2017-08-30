@@ -22,7 +22,6 @@ module Devise
 
       # Checks whether the user session has expired based on configured time.
       def timedout?(last_access)
-        return false if remember_exists_and_not_expired?
         !timeout_in.nil? && last_access && last_access <= timeout_in.ago
       end
 
@@ -31,11 +30,6 @@ module Devise
       end
 
       private
-
-      def remember_exists_and_not_expired?
-        return false unless respond_to?(:remember_created_at)
-        remember_created_at && !remember_expired?
-      end
 
       module ClassMethods
         Devise::Models.config(self, :timeout_in)
